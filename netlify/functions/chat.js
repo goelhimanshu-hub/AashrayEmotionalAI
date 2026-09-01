@@ -1,3 +1,16 @@
+// ─────────────────────────────────────────────
+// CORS headers — added to EVERY response
+// ─────────────────────────────────────────────
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Content-Type": "application/json"
+};
+
+// ─────────────────────────────────────────────
+// Helper: Gemini history → OpenAI message format
+// ─────────────────────────────────────────────
 function toOpenAIMessages(contents, systemPrompt) {
   return [
     { role: "system", content: systemPrompt },
@@ -8,12 +21,16 @@ function toOpenAIMessages(contents, systemPrompt) {
   ];
 }
 
+// ─────────────────────────────────────────────
+// AI Providers — tried in order, first success wins
+// ─────────────────────────────────────────────
 const PROVIDERS = [
   {
     name: "gemini",
     call: async (contents, systemPrompt) => {
       const res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        // FIX #3: corrected model name (gemini-2.5-flash → gemini-2.0-flash)
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
         {
           method: "POST",
           headers: {
@@ -34,6 +51,7 @@ const PROVIDERS = [
       return reply;
     }
   },
+
   {
     name: "groq",
     call: async (contents, systemPrompt) => {
@@ -56,6 +74,7 @@ const PROVIDERS = [
       return reply;
     }
   },
+
   {
     name: "openai",
     call: async (contents, systemPrompt) => {
@@ -78,6 +97,7 @@ const PROVIDERS = [
       return reply;
     }
   },
+
   {
     name: "openrouter",
     call: async (contents, systemPrompt) => {
@@ -86,7 +106,8 @@ const PROVIDERS = [
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "HTTP-Referer": "https://your-site.netlify.app",
+          // FIX #4: replace with your actual Netlify site URL
+          "HTTP-Referer": "https://aashray.netlify.app",
           "X-Title": "Aashray"
         },
         body: JSON.stringify({
@@ -104,14 +125,23 @@ const PROVIDERS = [
   }
 ];
 
+// ─────────────────────────────────────────────
+// Netlify Function Handler
+// ─────────────────────────────────────────────
 exports.handler = async (event) => {
+
+  // FIX #2: Handle OPTIONS preflight — browsers send this before every POST
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers: CORS, body: "" };
+  }
+
   try {
     const { contents, systemPrompt } = JSON.parse(event.body || "{}");
 
     if (!contents || !systemPrompt) {
       return {
         statusCode: 400,
-        headers: { "Content-Type": "application/json" },
+        headers: CORS,   // FIX #1: CORS on error responses too
         body: JSON.stringify({ error: "Missing contents or systemPrompt" })
       };
     }
@@ -122,7 +152,7 @@ exports.handler = async (event) => {
         const reply = await provider.call(contents, systemPrompt);
         return {
           statusCode: 200,
-          headers: { "Content-Type": "application/json" },
+          headers: CORS, // FIX #1: CORS on success response
           body: JSON.stringify({
             candidates: [{ content: { parts: [{ text: reply }] } }],
             _provider: provider.name
@@ -135,11 +165,12 @@ exports.handler = async (event) => {
     }
 
     throw lastErr || new Error("All providers failed");
+
   } catch (e) {
     console.error("Aashray function error:", e.message);
     return {
       statusCode: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: CORS, // FIX #1: CORS on 500 response too
       body: JSON.stringify({ error: e.message })
     };
   }
